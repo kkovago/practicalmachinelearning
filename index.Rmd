@@ -1,0 +1,179 @@
+---
+title: "Practical Machine Learning"
+author: "Karoly Kovago"
+date: "March 16, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Use data from wearablefitness devices to predict a variable which describes the quality of weight lifting exercises. Build a predictive model for this "classe" variable in the training set: select a model, use cross-validation, describe the expected out of sample error. Then use the prediction model to predict 20 different test cases.
+
+Training data:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+Test data:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Synopsis
+
+After cleaning the training data, applying different training methods and evaluating the prediction by cross-validation, the random forest method proved to be the most accurate. The randomforest based prediction model was used to predict 20 values for the test data. The results are displayed and written into a file called "predictionResults.txt".
+
+## Loading the libraries and the data
+
+```{r}
+# load libraries
+library(caret)
+library(randomForest)
+library(e1071)
+library(gbm)
+library(rpart)
+
+# download data if ther is no local data file yet
+sourceDirURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
+trainingFileName <- "pml-training.csv"
+testFileName <- "pml-testing.csv"
+
+downloadData <- function(sourceURL, fileName) {
+    if(!file.exists(fileName)) 
+        download.file(paste0(sourceURL, fileName),fileName)  
+}
+
+# load data
+downloadData(sourceDirURL, trainingFileName)
+downloadData(sourceDirURL, testFileName)
+```
+
+The data, by visual inspection, contains 3 types of missing data: empty values, NA values and "#DIV/0!" values; so these converted into NA during thedata load.
+
+```{r}
+trainingSet <- read.csv(trainingFileName, na.strings=c("NA","#DIV/0!",""))
+testSet <- read.csv(testFileName, na.strings=c("NA","#DIV/0!",""))
+```
+
+## Cleaning data
+
+First, check columns with NA values.
+```{r}
+as.factor(apply(trainingSet, 2, function(x) sum(is.na(x)) ))[2]
+```
+
+Apparently all columns which have at least one NA, have NA over 90% of the records. So I will delete columns with any NA.
+
+```{r}
+# first find the columns with no NA
+columnsNoNA <- apply(trainingSet, 2, function(x) {sum(is.na(x)) == 0} )
+#then filter the tyraining set to those columns only
+trainingSet <- trainingSet[, columnsNoNA]
+```
+
+In the next step I remove zero covariates.
+
+```{r}
+trainingSet <- trainingSet[, nearZeroVar(trainingSet, saveMetrics = TRUE)$nzv==FALSE]
+```
+
+Finally, I find that the first 5 columns of the training data have no predictive values for 'classe'; they are user and time stamp related data. Therefore I remove these columns.
+
+```{r}
+# Remove "X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2","cvtd_timestamp"
+trainingSet <- trainingSet[,-c(1:5)]
+dim(trainingSet)
+```
+
+## Data analysis
+
+### Cross validation set
+
+```{r}
+set.seed(2017)
+inTrain <- createDataPartition(trainingSet$classe, p=0.6, list=FALSE)
+cleanTrainingSet <- trainingSet[inTrain, ]
+cleanValidationSet <- trainingSet[-inTrain, ]
+```
+
+### Examine 'classe'
+
+'classe' has 5 possible values:
+A: exactly according to the specification 
+B: throwing the elbows to the front 
+C: lifting the dumbbell only halfway 
+D: lowering the dumbbell only halfway 
+E: throwing the hips to the front
+
+```{r}
+plot(cleanTrainingSet$classe, col="blue", 
+     main="Frequency of 'classe' values", xlab="'classe' values", ylab="Frequency")
+```
+
+As the diagram shows the frequency of values is in a well defined range.
+
+### Training models
+
+For comparison of performance of the models, I build random prediction models offorest, decision tree and gbm methods. Calculating the models takes a long time, so I generate the models once then save the model objects to files, and load the models from the files if they exist.
+
+```{r}
+if(file.exists("gbm.trainingModel.RData")) {
+  load(file="gbm.trainingModel.RData", verbose=TRUE)
+} else {
+  gbm.trainingModel <- train(classe ~ ., data=cleanTrainingSet, method="gbm")
+  save(gbm.trainingModel, file="gbm.trainingModel.RData")
+}
+
+if(file.exists("rf.trainingModel.RData")) {
+  load(file="rf.trainingModel.RData", verbose=TRUE)
+} else {
+  rf.trainingModel <- train(classe ~ ., data=cleanTrainingSet, method="rf")
+  save(rf.trainingModel, file="rf.trainingModel.RData")
+}
+
+if(file.exists("rpart.trainingModel.RData")) {
+  load(file="rpart.trainingModel.RData", verbose=TRUE)
+} else {
+  rpart.trainingModel <- train(classe ~ ., data=cleanTrainingSet, method="rpart")
+  save(rpart.trainingModel, file="rpart.trainingModel.RData")
+}
+```
+
+Evaluating the performance of the prediction models
+
+```{r}
+# make the predictions on the validation set
+gbm.pred <- predict(gbm.trainingModel, cleanValidationSet)
+rf.pred <- predict(rf.trainingModel, cleanValidationSet)
+rpart.pred <- predict(rpart.trainingModel, cleanValidationSet)
+
+# create and print the confusion matrices to compare the predictions
+gbm.cfm <- confusionMatrix(gbm.pred, cleanValidationSet$classe)
+rf.cfm <- confusionMatrix(rf.pred, cleanValidationSet$classe)
+rpart.cfm <- confusionMatrix(rpart.pred, cleanValidationSet$classe)
+
+print("rf:")
+print(rf.cfm$table)
+print(rf.cfm$overall)
+print("gbm:")
+print(gbm.cfm$table)
+print(gbm.cfm$overall)
+print("rpart:")
+print(rpart.cfm$table)
+print(rpart.cfm$overall)
+```
+
+The random forest model is the most accurate (99.7%), so I use it to create the prediction, which I display and also write into a file called "predictionResults.txt"
+
+```{r}
+# predict using the best (random forest) model
+test.pred <- predict(rf.trainingModel, testSet)
+
+# print out the result
+predResults <- data.frame(testSet$problem_id,test.pred)
+print(predResults)
+write.table(predResults, file="predictionResults.txt", sep="\t")
+```
+

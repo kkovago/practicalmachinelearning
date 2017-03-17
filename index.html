@@ -166,6 +166,7 @@ library(caret)</code></pre>
 <pre><code>## Loading required package: parallel</code></pre>
 <pre><code>## Loaded gbm 2.1.1</code></pre>
 <pre class="r"><code>library(rpart)
+library(plyr)
 
 # download data if ther is no local data file yet
 sourceDirURL &lt;- &quot;https://d396qusza40orc.cloudfront.net/predmachlearn/&quot;
@@ -192,15 +193,15 @@ testSet &lt;- read.csv(testFileName, na.strings=c(&quot;NA&quot;,&quot;#DIV/0!&q
 ##         0 
 ## 17 Levels: 0 19216 19217 19218 19220 19221 19225 19226 19227 ... 19622</code></pre>
 <p>Apparently all columns which have at least one NA, have NA over 90% of the records. So I will delete columns with any NA.</p>
-<pre class="r"><code># first find the columns with no NA
-columnsNoNA &lt;- apply(trainingSet, 2, function(x) {sum(is.na(x)) == 0} )
-#then filter the tyraining set to those columns only
+<pre class="r"><code># Find the columns with no NA
+columnsNoNA &lt;- apply(trainingSet, 2, function(x) {sum(is.na(x))==0} )
+# then filter the training set to contain only those columns
 trainingSet &lt;- trainingSet[, columnsNoNA]</code></pre>
 <p>In the next step I remove zero covariates.</p>
-<pre class="r"><code>trainingSet &lt;- trainingSet[, nearZeroVar(trainingSet, saveMetrics = TRUE)$nzv==FALSE]</code></pre>
-<p>Finally, I find that the first 5 columns of the training data have no predictive values for ‘classe’; they are user and time stamp related data. Therefore I remove these columns.</p>
+<pre class="r"><code>trainingSet &lt;- trainingSet[, nearZeroVar(trainingSet, saveMetrics=TRUE)$nzv==FALSE]</code></pre>
+<p>Finally, I find that the first 5 columns of the training data have no predictive value for ‘classe’; they are user and time stamp related data. Therefore I remove these columns.</p>
 <pre class="r"><code># Remove &quot;X&quot;, &quot;user_name&quot;, &quot;raw_timestamp_part_1&quot;, &quot;raw_timestamp_part_2&quot;,&quot;cvtd_timestamp&quot;
-trainingSet &lt;- trainingSet[,-c(1:5)]
+trainingSet &lt;- trainingSet[, -c(1:5)]
 dim(trainingSet)</code></pre>
 <pre><code>## [1] 19622    54</code></pre>
 </div>
@@ -225,35 +226,34 @@ cleanValidationSet &lt;- trainingSet[-inTrain, ]</code></pre>
 <h3>Training models</h3>
 <p>For comparison of performance of the models, I build random prediction models offorest, decision tree and gbm methods. Calculating the models takes a long time, so I generate the models once then save the model objects to files, and load the models from the files if they exist.</p>
 <pre class="r"><code>if(file.exists(&quot;gbm.trainingModel.RData&quot;)) {
-  load(file=&quot;gbm.trainingModel.RData&quot;, verbose=TRUE)
+    load(file=&quot;gbm.trainingModel.RData&quot;, verbose=TRUE)
 } else {
-  gbm.trainingModel &lt;- train(classe ~ ., data=cleanTrainingSet, method=&quot;gbm&quot;)
-  save(gbm.trainingModel, file=&quot;gbm.trainingModel.RData&quot;)
+    gbm.trainingModel &lt;- train(classe ~ ., data=cleanTrainingSet, method=&quot;gbm&quot;)
+    save(gbm.trainingModel, file=&quot;gbm.trainingModel.RData&quot;)
 }</code></pre>
 <pre><code>## Loading objects:
 ##   gbm.trainingModel</code></pre>
 <pre class="r"><code>if(file.exists(&quot;rf.trainingModel.RData&quot;)) {
-  load(file=&quot;rf.trainingModel.RData&quot;, verbose=TRUE)
+    load(file=&quot;rf.trainingModel.RData&quot;, verbose=TRUE)
 } else {
-  rf.trainingModel &lt;- train(classe ~ ., data=cleanTrainingSet, method=&quot;rf&quot;)
-  save(rf.trainingModel, file=&quot;rf.trainingModel.RData&quot;)
+    rf.trainingModel &lt;- train(classe ~ ., data=cleanTrainingSet, method=&quot;rf&quot;)
+    save(rf.trainingModel, file=&quot;rf.trainingModel.RData&quot;)
 }</code></pre>
 <pre><code>## Loading objects:
 ##   rf.trainingModel</code></pre>
 <pre class="r"><code>if(file.exists(&quot;rpart.trainingModel.RData&quot;)) {
-  load(file=&quot;rpart.trainingModel.RData&quot;, verbose=TRUE)
+    load(file=&quot;rpart.trainingModel.RData&quot;, verbose=TRUE)
 } else {
-  rpart.trainingModel &lt;- train(classe ~ ., data=cleanTrainingSet, method=&quot;rpart&quot;)
-  save(rpart.trainingModel, file=&quot;rpart.trainingModel.RData&quot;)
+    rpart.trainingModel &lt;- rpart(classe ~ ., data=cleanTrainingSet, method=&quot;class&quot;)
+    save(rpart.trainingModel, file=&quot;rpart.trainingModel.RData&quot;)
 }</code></pre>
 <pre><code>## Loading objects:
 ##   rpart.trainingModel</code></pre>
 <p>Evaluating the performance of the prediction models</p>
 <pre class="r"><code># make the predictions on the validation set
-gbm.pred &lt;- predict(gbm.trainingModel, cleanValidationSet)</code></pre>
-<pre><code>## Loading required package: plyr</code></pre>
-<pre class="r"><code>rf.pred &lt;- predict(rf.trainingModel, cleanValidationSet)
-rpart.pred &lt;- predict(rpart.trainingModel, cleanValidationSet)
+gbm.pred &lt;- predict(gbm.trainingModel, cleanValidationSet)
+rf.pred &lt;- predict(rf.trainingModel, cleanValidationSet)
+rpart.pred &lt;- predict(rpart.trainingModel, cleanValidationSet, type=&quot;class&quot;)
 
 # create and print the confusion matrices to compare the predictions
 gbm.cfm &lt;- confusionMatrix(gbm.pred, cleanValidationSet$classe)
@@ -295,17 +295,28 @@ print(&quot;rf:&quot;)</code></pre>
 <pre class="r"><code>print(rpart.cfm$table)</code></pre>
 <pre><code>##           Reference
 ## Prediction    A    B    C    D    E
-##          A 2018  616  599  547  205
-##          B   38  517   52  236  176
-##          C  171  385  717  503  395
-##          D    0    0    0    0    0
-##          E    5    0    0    0  666</code></pre>
+##          A 2022  263   59   75  107
+##          B   90  953  105  113  176
+##          C   18   87 1071  199   83
+##          D   70  171   77  851  160
+##          E   32   44   56   48  916</code></pre>
 <pre class="r"><code>print(rpart.cfm$overall)</code></pre>
 <pre><code>##       Accuracy          Kappa  AccuracyLower  AccuracyUpper   AccuracyNull 
-##      0.4993627      0.3467881      0.4882374      0.5104885      0.2844762 
+##   7.408871e-01   6.708181e-01   7.310401e-01   7.505548e-01   2.844762e-01 
 ## AccuracyPValue  McnemarPValue 
-##      0.0000000            NaN</code></pre>
-<p>The random forest model is the most accurate (99.7%), so I use it to create the prediction, which I display and also write into a file called “predictionResults.txt”</p>
+##   0.000000e+00   3.894730e-71</code></pre>
+<p>Very clearly the random forest model is the most accurate (99.72%).</p>
+</div>
+<div id="expected-out-of-sample-error" class="section level3">
+<h3>Expected out of sample error</h3>
+<p>The expected out of sample error is basically one minus the accuarcy of the validation accuracy:</p>
+<pre class="r"><code>print(paste(&quot;Expected out of sample error:&quot;,round(100*(1-0.9972),2),&quot;%&quot;))</code></pre>
+<pre><code>## [1] &quot;Expected out of sample error: 0.28 %&quot;</code></pre>
+</div>
+</div>
+<div id="prediction" class="section level2">
+<h2>Prediction</h2>
+<p>Below is the prediction using the random forest method. The results are also written into a file called “predictionResults.txt”</p>
 <pre class="r"><code># predict using the best (random forest) model
 test.pred &lt;- predict(rf.trainingModel, testSet)
 
@@ -334,7 +345,6 @@ print(predResults)</code></pre>
 ## 19                 19         B
 ## 20                 20         B</code></pre>
 <pre class="r"><code>write.table(predResults, file=&quot;predictionResults.txt&quot;, sep=&quot;\t&quot;)</code></pre>
-</div>
 </div>
 
 
